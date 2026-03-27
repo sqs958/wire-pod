@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 build-essential autoconf unzip zip curl git pkg-config libopus-dev libogg-dev
+          sudo apt-get install -y mingw-w64 build-essential autoconf unzip zip curl git pkg-config libopus-dev libogg-dev binutils-multiarch
           
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -36,6 +36,12 @@ jobs:
           wget -q https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
           unzip -o vosk-win64-0.3.45.zip
           mv vosk-win64-0.3.45 vosk
+          
+      - name: Create MinGW import library from vosk DLL
+        run: |
+          cd libs/vosk/vosk
+          x86_64-w64-mingw32-dlltool -d libvosk.def -l libvosk.a -D libvosk.dll
+          ls -la libvosk.a
           
       - name: Patch vosk module
         run: |
@@ -51,9 +57,8 @@ jobs:
           GO_TAGS: nolibopusfile
           CGO_ENABLED: 1
           CC: x86_64-w64-mingw32-gcc
-          CGO_LDFLAGS: "-L${GITHUB_WORKSPACE}/libs/vosk/vosk -L/usr/x86_64-w64-mingw32/lib -L/usr/lib/x86_64-linux-gnu"
+          CGO_LDFLAGS: "-L${GITHUB_WORKSPACE}/libs/vosk/vosk"
           CGO_CFLAGS: "-I${GITHUB_WORKSPACE}/libs/vosk/vosk"
-          PKG_CONFIG_PATH: "/usr/lib/x86_64-linux-gnu/pkgconfig"
         run: |
           cd chipper
           x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
