@@ -33,12 +33,14 @@ jobs:
           
           # Build ogg first
           cd ${GITHUB_WORKSPACE}
+          rm -rf ogg opus
           git clone --depth=1 https://github.com/xiph/ogg
           cd ogg
           ./autogen.sh
           ./configure --host=${PODHOST} --prefix="${PODLIBS}/ogg"
           make -j$(nproc)
-          make install
+          sudo make install
+          ls -la ${PODLIBS}/ogg/lib/pkgconfig/
           
           # Build opus
           cd ${GITHUB_WORKSPACE}
@@ -47,7 +49,8 @@ jobs:
           ./autogen.sh
           ./configure --host=${PODHOST} --prefix="${PODLIBS}/opus"
           make -j$(nproc)
-          make install
+          sudo make install
+          ls -la ${PODLIBS}/opus/lib/pkgconfig/
           
       - name: Clone vosk
         run: |
@@ -79,6 +82,7 @@ jobs:
           CC: x86_64-w64-mingw32-gcc
           CGO_LDFLAGS: "-L${GITHUB_WORKSPACE}/libs/opus/lib -L${GITHUB_WORKSPACE}/libs/ogg/lib -L${GITHUB_WORKSPACE}/libs/vosk/vosk"
           CGO_CFLAGS: "-I${GITHUB_WORKSPACE}/libs/opus/include -I${GITHUB_WORKSPACE}/libs/ogg/include -I${GITHUB_WORKSPACE}/libs/vosk/vosk"
+          PKG_CONFIG_PATH: "${GITHUB_WORKSPACE}/libs/opus/lib/pkgconfig:${GITHUB_WORKSPACE}/libs/ogg/lib/pkgconfig"
         run: |
           cd chipper
           x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
@@ -98,7 +102,8 @@ jobs:
           cp windows/uninstall.exe tmp/wire-pod/
           cp windows/chipper.exe tmp/wire-pod/chipper/
           cp ../libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
-          cp ../libs/opus/bin/libopus-0.dll tmp/wire-pod/chipper/
+          cp ../libs/opus/lib/*.dll tmp/wire-pod/chipper/ 2>/dev/null || echo "No opus dll"
+          cp ../libs/ogg/lib/*.dll tmp/wire-pod/chipper/ 2>/dev/null || echo "No ogg dll"
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
