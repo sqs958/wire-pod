@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g., v1.1.2-custom)'
+        description: 'Version tag'
         required: true
         default: 'v1.1.2-chinese-tts'
 
@@ -22,8 +22,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 build-essential autoconf unzip zip curl git pkg-config libasound2-dev libopus-dev libogg-dev
-          
+          sudo apt-get install -y mingw-w64 build-essential autoconf unzip zip curl git pkg-config
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -48,22 +48,14 @@ jobs:
           CGO_CFLAGS: "-I${GITHUB_WORKSPACE}/libs/vosk/vosk"
         run: |
           cd chipper
-          
-          # Build chipper.exe
           x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
           go build -tags ${GO_TAGS} -ldflags "-H=windowsgui" -o windows/chipper.exe ./cmd/windows
-          
-          # Build uninstall.exe  
           go build -tags ${GO_TAGS} -ldflags "-H=windowsgui" -o windows/uninstall.exe ./cmd/wire-pod-installer/uninstall/main.go
-          
-          echo "Build completed successfully"
-          ls -la windows/*.exe
           
       - name: Create distribution package
         run: |
           cd chipper
           mkdir -p tmp/wire-pod/chipper
-          mkdir -p tmp/wire-pod/vector-cloud/build
           cp -r intent-data tmp/wire-pod/chipper/
           cp weather-map.json tmp/wire-pod/chipper/
           cp -r webroot tmp/wire-pod/chipper/
@@ -74,37 +66,8 @@ jobs:
           cp windows/chipper.exe tmp/wire-pod/chipper/
           cp libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
           
-          echo "Package created"
-          ls -la tmp/wire-pod/chipper/
-          
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: wire-pod-windows-${{ inputs.version }}
           path: chipper/tmp/wire-pod/
-          
-      - name: Create Release
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ inputs.version }}
-          name: wire-pod ${{ inputs.version }}
-          draft: true
-          files: |
-            chipper/tmp/wire-pod/**/*.exe
-            chipper/tmp/wire-pod/**/*.dll
-            chipper/tmp/wire-pod/**/*
-          body: |
-            Custom wire-pod build with Chinese TTS support.
-            
-            ## Changes in this build:
-            - Fixed `ExternalAudioStreamPlayback` gRPC method for Vector audio streaming
-            - Chinese TTS generation using Windows SAPI
-            - DeepSeek AI integration support
-            
-            ## Usage:
-            1. Extract the zip file
-            2. Run `chipper.exe`
-            3. Access http://YOUR_IP:8080 for configuration
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
