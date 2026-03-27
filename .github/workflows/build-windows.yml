@@ -31,18 +31,17 @@ jobs:
           mkdir -p libs
           cd libs
           
-          echo "Downloading opus..."
           curl -sL "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-opus-1.3.1-2-any.pkg.tar.zst" -o opus.pkg.tar.zst
-          tar -xf opus.pkg.tar.zst 2>/dev/null || echo "opus extract failed"
+          tar -xf opus.pkg.tar.zst
           rm -f opus.pkg.tar.zst
           
-          echo "Downloading ogg..."
           curl -sL "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libogg-1.3.5-1-any.pkg.tar.zst" -o ogg.pkg.tar.zst
-          tar -xf ogg.pkg.tar.zst 2>/dev/null || echo "ogg extract failed"
+          tar -xf ogg.pkg.tar.zst
           rm -f ogg.pkg.tar.zst
           
-          echo "=== Libraries ==="
-          find . -name "*.dll" 2>/dev/null | head -5
+          echo "=== Find pkgconfig ==="
+          find . -name "opus.pc" 2>/dev/null
+          find . -name "*.pc" 2>/dev/null | head -5
           
       - name: Download vosk
         run: |
@@ -64,28 +63,35 @@ jobs:
           cd chipper
           go mod download
           GOMODCACHE=$(go env GOMODCACHE)
-          sudo cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/" 2>/dev/null || \
-          cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
+          cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/" 2>/dev/null || \
+          sudo cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
           
       - name: Build chipper
         run: |
           cd chipper
           
-          OPUS_DIR=$GITHUB_WORKSPACE/libs/mingw64
+          # Find actual paths
+          MINGW_ROOT=$GITHUB_WORKSPACE/libs/mingw64
           VOSK_DIR=$GITHUB_WORKSPACE/libs/vosk/vosk
+          
+          # Find pkgconfig path
+          OPUS_PC=$(find $MINGW_ROOT -name "opus.pc" 2>/dev/null | head -1)
+          OPUS_PC_DIR=$(dirname "$OPUS_PC" 2>/dev/null)
+          
+          echo "OPUS_PC: $OPUS_PC"
+          echo "OPUS_PC_DIR: $OPUS_PC_DIR"
           
           export GOOS=windows
           export GOARCH=amd64
           export GO_TAGS=nolibopusfile
           export CGO_ENABLED=1
           export CC=x86_64-w64-mingw32-gcc
-          export CGO_LDFLAGS="-L$OPUS_DIR/lib -L$VOSK_DIR -L/usr/x86_64-w64-mingw32/lib"
-          export CGO_CFLAGS="-I$VOSK_DIR -I$OPUS_DIR/include"
-          export PKG_CONFIG_PATH="$OPUS_DIR/lib/pkgconfig:$VOSK_DIR"
+          export CGO_LDFLAGS="-L$MINGW_ROOT/lib -L$VOSK_DIR -L/usr/x86_64-w64-mingw32/lib"
+          export CGO_CFLAGS="-I$VOSK_DIR -I$MINGW_ROOT/include"
+          export PKG_CONFIG_PATH="$OPUS_PC_DIR:$MINGW_ROOT/lib/pkgconfig"
           
-          echo "OPUS_DIR: $OPUS_DIR"
-          ls -la $OPUS_DIR/lib/ 2>/dev/null | head -10 || echo "No opus lib dir"
-          ls -la $OPUS_DIR/bin/ 2>/dev/null | head -10 || echo "No opus bin dir"
+          echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+          pkg-config --list-all 2>/dev/null | grep opus || echo "opus not in pkg-config"
           
           x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
           go build -tags $GO_TAGS -ldflags "-H=windowsgui" -o windows/chipper.exe ./cmd/windows
