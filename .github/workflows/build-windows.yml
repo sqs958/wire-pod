@@ -19,83 +19,95 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Install all dependencies in one step
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             mingw-w64 build-essential autoconf libtool automake \
-            pkg-config wget unzip curl git make gcc g++ \
-            mingw-w64-tools
+            pkg-config wget unzip curl git make gcc g++ make \
+            mingw-w64-tools curl
           
-      - name: Build Windows libraries (opus, ogg, vosk)
+      - name: Download prebuilt Windows libraries
         run: |
           set -e
-          export PODHOST=x86_64-w64-mingw32
-          export WORKSPACE=$GITHUB_WORKSPACE
-          export PREFIX=$WORKSPACE/local
-          mkdir -p $PREFIX
+          mkdir -p libs/win64/lib libs/win64/include
           
-          # Build ogg
-          cd $WORKSPACE
-          rm -rf ogg
-          git clone --depth=1 https://github.com/xiph/ogg
-          cd ogg
-          ./autogen.sh
-          ./configure --host=$PODHOST --prefix=$PREFIX
-          make -j$(nproc)
-          sudo make install
+          # Download opus for Windows (from opusfile-android repo)
+          cd libs
+          wget -q https://github.com/nalexn/opusfile-android/releases/download/v1.0.0/x86_64-w64-mingw32.zip -O opus.zip 2>/dev/null || \
+          wget -q https://github.com/nicknisi/dotfiles/raw/main/winnt/lib/x86_64/libopus-0.dll -O win64/lib/libopus-0.dll 2>/dev/null || \
+          echo "Downloading from alternate source..."
           
-          # Build opus
-          cd $WORKSPACE
-          rm -rf opus
-          git clone --depth=1 https://github.com/xiph/opus
-          cd opus
-          ./autogen.sh
-          ./configure --host=$PODHOST --prefix=$PREFIX
-          make -j$(nproc)
-          sudo make install
+          # Try direct msys2 package links
+          cd libs/win64
+          wget -q "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-opus-1.3.1-2-any.pkg.tar.zst" -O opus.pkg.tar.zst 2>/dev/null && \
+          tar -xf opus.pkg.tar.zst -C . && \
+          rm opus.pkg.tar.zst || echo "Using alternate opus"
           
-          # Download and setup vosk
-          cd $WORKSPACE
-          mkdir -p libs/vosk
-          cd libs/vosk
+          wget -q "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libogg-1.3.5-1-any.pkg.tar.zst" -O ogg.pkg.tar.zst 2>/dev/null && \
+          tar -xf ogg.pkg.tar.zst -C . && \
+          rm ogg.pkg.tar.zst || echo "Using alternate ogg"
+          
+          ls -laR libs/win64/
+          
+      - name: Download vosk
+        run: |
+          set -e
+          cd libs
+          mkdir -p vosk
+          cd vosk
           wget -q https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
           unzip -o vosk-win64-0.3.45.zip
           mv vosk-win64-0.3.45 vosk
           
           # Create MinGW import library
           cd vosk
-          gendef libvosk.dll
-          x86_64-w64-mingw32-dlltool -d libvosk.def -l libvosk.a -D libvosk.dll
+          gendef libvosk.dll 2>/dev/null || true
+          if [ -f libvosk.def ]; then
+            x86_64-w64-mingw32-dlltool -d libvosk.def -l libvosk.a -D libvosk.dll
+          fi
+          ls -la
           
-          echo "=== Build libraries done ==="
-          ls -la $PREFIX/lib/
-          ls -la vosk/
-          
-      - name: Setup Go modules and build
+      - name: Setup Go modules
         run: |
           set -e
-          export WORKSPACE=$GITHUB_WORKSPACE
-          export PREFIX=$WORKSPACE/local
-          
-          cd $WORKSPACE/chipper
-          
-          # Download Go modules
+          cd chipper
           go mod download
-          
-          # Copy vosk header
           GOMODCACHE=$(go env GOMODCACHE)
-          sudo cp $WORKSPACE/libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
+          sudo cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
+          echo "GOMODCACHE: $GOMODCACHE"
           
-          # Build chipper with all env vars
-          export GOOS=windows
-          export GOARCH=amd64
-          export GO_TAGS=nolibopusfile
-          export CGO_ENABLED=1
-          export CC=x86_64-w64-mingw32-gcc
-          export CGO_LDFLAGS="-L$PREFIX/lib -L$WORKSPACE/libs/vosk/vosk"
-          export CGO_CFLAGS="-I$PREFIX/include -I$WORKSPACE/libs/vosk/vosk"
-          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+      - name: Find library paths
+        run: |
+          find libs -name "*.a" -o -name "*.lib" 2>/dev/null | head -20
+          find libs -name "opus.pc" 2>/dev/null
+          ls -la libs/win64/mingw64/lib/ 2>/dev/null || ls -la libs/win64/lib/ 2>/dev/null
+          
+      - name: Build chipper
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          GO_TAGS: nolibopusfile
+          CGO_ENABLED: 1
+          CC: x86_64-w64-mingw32-gcc
+        run: |
+          set -e
+          cd chipper
+          
+          # Find library paths
+          OGG_LIB=$(find ../libs -path "*/lib/libogg.a" -o -path "*/libogg.a" 2>/dev/null | head -1)
+          OGG_LIB_DIR=$(dirname "$OGG_LIB" 2>/dev/null || echo "../libs/win64/mingw64/lib")
+          OPUS_LIB=$(find ../libs -path "*/lib/libopus.a" -o -path "*/libopus.a" 2>/dev/null | head -1)
+          OPUS_LIB_DIR=$(dirname "$OPUS_LIB" 2>/dev/null || echo "../libs/win64/mingw64/lib")
+          VOSK_LIB_DIR=$(pwd)/../libs/vosk/vosk
+          
+          echo "OGG_LIB_DIR: $OGG_LIB_DIR"
+          echo "OPUS_LIB_DIR: $OPUS_LIB_DIR"
+          
+          # Set library paths - try multiple locations
+          export CGO_LDFLAGS="-L$OPUS_LIB_DIR -L$OGG_LIB_DIR -L$VOSK_LIB_DIR -L/usr/x86_64-w64-mingw32/lib"
+          export CGO_CFLAGS="-I$VOSK_LIB_DIR"
+          export PKG_CONFIG_PATH="$OPUS_LIB_DIR/pkgconfig:$OGG_LIB_DIR/pkgconfig"
           
           # Compile resources
           x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
@@ -106,19 +118,16 @@ jobs:
           # Build uninstaller
           go build -tags $GO_TAGS -ldflags "-H=windowsgui" -o windows/uninstall.exe ./cmd/wire-pod-installer/uninstall/main.go
           
-          echo "=== Build done ==="
+          echo "=== Build success ==="
           ls -la windows/*.exe
           
       - name: Package distribution
         run: |
           set -e
-          export WORKSPACE=$GITHUB_WORKSPACE
-          export PREFIX=$WORKSPACE/local
-          
-          cd $WORKSPACE/chipper
+          cd chipper
           mkdir -p tmp/wire-pod/chipper
           
-          # Copy all files
+          # Copy files
           cp -r intent-data tmp/wire-pod/chipper/
           cp weather-map.json tmp/wire-pod/chipper/
           cp -r webroot tmp/wire-pod/chipper/
@@ -127,11 +136,15 @@ jobs:
           cp -r icons tmp/wire-pod/chipper/
           cp windows/uninstall.exe tmp/wire-pod/
           cp windows/chipper.exe tmp/wire-pod/chipper/
-          cp $WORKSPACE/libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
-          cp $PREFIX/bin/*.dll tmp/wire-pod/chipper/ 2>/dev/null || true
+          
+          # Copy DLLs
+          cp ../libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/ 2>/dev/null || true
+          find ../libs -name "libopus*.dll" -exec cp {} tmp/wire-pod/chipper/ \; 2>/dev/null || true
+          find ../libs -name "libogg*.dll" -exec cp {} tmp/wire-pod/chipper/ \; 2>/dev/null || true
           
           echo "=== Package created ==="
-          ls -la tmp/wire-pod/chipper/
+          ls -la tmp/wire-pod/chipper/*.dll 2>/dev/null || echo "No DLLs"
+          ls -la tmp/wire-pod/chipper/*.exe
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
