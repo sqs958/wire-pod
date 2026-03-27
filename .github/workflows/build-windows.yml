@@ -1,0 +1,124 @@
+name: Build wire-pod Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.1.2-custom)'
+        required: true
+        default: 'v1.1.2-chinese-tts'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 build-essential autoconf unzip zip curl git pkg-config libasound2-dev libopus-dev libogg-dev
+          
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          
+      - name: Clone vosk
+        run: |
+          mkdir -p libs/vosk
+          cd libs/vosk
+          wget -q https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
+          unzip -o vosk-win64-0.3.45.zip
+          mv vosk-win64-0.3.45 vosk
+          
+      - name: Build vector-cloud
+        run: |
+          cd vector-cloud
+          mkdir -p build
+          cmake -S . -B build -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++
+          cmake --build build --target vic-cloud
+          cp build/vic-cloud ../chipper/
+          
+      - name: Build chipper
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          GO_TAGS: nolibopusfile
+          CGO_ENABLED: 1
+          CC: x86_64-w64-mingw32-gcc
+          CGO_LDFLAGS: "-L${GITHUB_WORKSPACE}/libs/vosk/vosk"
+          CGO_CFLAGS: "-I${GITHUB_WORKSPACE}/libs/vosk/vosk"
+        run: |
+          cd chipper
+          
+          # Build chipper.exe
+          x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
+          go build -tags ${GO_TAGS} -ldflags "-H=windowsgui" -o windows/chipper.exe ./cmd/windows
+          
+          # Build uninstall.exe  
+          go build -tags ${GO_TAGS} -ldflags "-H=windowsgui" -o windows/uninstall.exe ./cmd/wire-pod-installer/uninstall/main.go
+          
+          echo "Build completed successfully"
+          ls -la windows/*.exe
+          
+      - name: Create distribution package
+        run: |
+          cd chipper
+          mkdir -p tmp/wire-pod/chipper
+          mkdir -p tmp/wire-pod/vector-cloud/build
+          
+          cp -r intent-data tmp/wire-pod/chipper/
+          cp weather-map.json tmp/wire-pod/chipper/
+          cp -r webroot tmp/wire-pod/chipper/
+          cp -r epod tmp/wire-pod/chipper/
+          cp stttest.pcm tmp/wire-pod/chipper/
+          cp ../../vector-cloud/build/vic-cloud tmp/wire-pod/vector-cloud/build/ 2>/dev/null || echo "vic-cloud not built"
+          cp ../../vector-cloud/pod-bot-install.sh tmp/wire-pod/vector-cloud/
+          cp -r icons tmp/wire-pod/chipper/
+          
+          cp windows/uninstall.exe tmp/wire-pod/
+          cp windows/chipper.exe tmp/wire-pod/chipper/
+          
+          # Copy DLLs
+          cp libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
+          
+          echo "Package created"
+          ls -la tmp/wire-pod/chipper/
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wire-pod-windows-${{ inputs.version }}
+          path: chipper/tmp/wire-pod/
+          
+      - name: Create Release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.version }}
+          name: wire-pod ${{ inputs.version }}
+          draft: true
+          files: |
+            chipper/tmp/wire-pod/**/*.exe
+            chipper/tmp/wire-pod/**/*.dll
+            chipper/tmp/wire-pod/**/*
+          body: |
+            Custom wire-pod build with Chinese TTS support.
+            
+            ## Changes in this build:
+            - Fixed `ExternalAudioStreamPlayback` gRPC method for Vector audio streaming
+            - Chinese TTS generation using Windows SAPI
+            - DeepSeek AI integration support
+            
+            ## Usage:
+            1. Extract the zip file
+            2. Run `chipper.exe`
+            3. Access http://YOUR_IP:8080 for configuration
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

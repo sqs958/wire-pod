@@ -1,0 +1,8 @@
+{
+  "jdocs": "10.10.1.167:443",
+  "tms": "10.10.1.167:443",
+  "chipper": "10.10.1.167:443",
+  "check": "10.10.1.167/ok",
+  "logfiles": "s3://anki-device-logs-prod/victor",
+  "appkey": "oDoa0quieSeir6goowai7f"
+}
