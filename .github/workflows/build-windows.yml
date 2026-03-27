@@ -36,15 +36,13 @@ jobs:
           wget -q https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
           unzip -o vosk-win64-0.3.45.zip
           mv vosk-win64-0.3.45 vosk
-          ls -la vosk/
           
-      - name: Download Go modules and setup headers
+      - name: Patch vosk module
         run: |
           cd chipper
           go mod download
-          mkdir -p ~/go/pkg/mod/github.com/alphacep/vosk-api/go@v0.3.45
-          cp ../libs/vosk/vosk/vosk_api.h ~/go/pkg/mod/github.com/alphacep/vosk-api/go@v0.3.45/
-          ls -la ../libs/vosk/vosk/
+          GOMODCACHE=$(go env GOMODCACHE)
+          cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
           
       - name: Build chipper
         env:
