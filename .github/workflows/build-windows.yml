@@ -37,14 +37,6 @@ jobs:
           unzip -o vosk-win64-0.3.45.zip
           mv vosk-win64-0.3.45 vosk
           
-      - name: Build vector-cloud
-        run: |
-          cd vector-cloud
-          mkdir -p build
-          cmake -S . -B build -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++
-          cmake --build build --target vic-cloud
-          cp build/vic-cloud ../chipper/
-          
       - name: Build chipper
         env:
           GOOS: windows
@@ -72,20 +64,14 @@ jobs:
           cd chipper
           mkdir -p tmp/wire-pod/chipper
           mkdir -p tmp/wire-pod/vector-cloud/build
-          
           cp -r intent-data tmp/wire-pod/chipper/
           cp weather-map.json tmp/wire-pod/chipper/
           cp -r webroot tmp/wire-pod/chipper/
           cp -r epod tmp/wire-pod/chipper/
           cp stttest.pcm tmp/wire-pod/chipper/
-          cp ../../vector-cloud/build/vic-cloud tmp/wire-pod/vector-cloud/build/ 2>/dev/null || echo "vic-cloud not built"
-          cp ../../vector-cloud/pod-bot-install.sh tmp/wire-pod/vector-cloud/
           cp -r icons tmp/wire-pod/chipper/
-          
           cp windows/uninstall.exe tmp/wire-pod/
           cp windows/chipper.exe tmp/wire-pod/chipper/
-          
-          # Copy DLLs
           cp libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
           
           echo "Package created"
