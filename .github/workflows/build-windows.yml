@@ -13,86 +13,112 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Install dependencies
+      - name: Install all dependencies in one step
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 build-essential autoconf libtool automake pkg-config wget unzip curl git
-          sudo apt-get install -y mingw-w64-tools
+          sudo apt-get install -y \
+            mingw-w64 build-essential autoconf libtool automake \
+            pkg-config wget unzip curl git make gcc g++ \
+            mingw-w64-tools
           
-      - name: Clone and build opus
+      - name: Build Windows libraries (opus, ogg, vosk)
         run: |
+          set -e
           export PODHOST=x86_64-w64-mingw32
-          export PODLIBS=${GITHUB_WORKSPACE}/libs
-          mkdir -p ${PODLIBS}/opus ${PODLIBS}/ogg
+          export WORKSPACE=$GITHUB_WORKSPACE
+          export PREFIX=$WORKSPACE/local
+          mkdir -p $PREFIX
           
-          # Build ogg first
-          cd ${GITHUB_WORKSPACE}
-          rm -rf ogg opus
+          # Build ogg
+          cd $WORKSPACE
+          rm -rf ogg
           git clone --depth=1 https://github.com/xiph/ogg
           cd ogg
           ./autogen.sh
-          ./configure --host=${PODHOST} --prefix="${PODLIBS}/ogg"
+          ./configure --host=$PODHOST --prefix=$PREFIX
           make -j$(nproc)
           sudo make install
-          ls -la ${PODLIBS}/ogg/lib/pkgconfig/
           
           # Build opus
-          cd ${GITHUB_WORKSPACE}
+          cd $WORKSPACE
+          rm -rf opus
           git clone --depth=1 https://github.com/xiph/opus
           cd opus
           ./autogen.sh
-          ./configure --host=${PODHOST} --prefix="${PODLIBS}/opus"
+          ./configure --host=$PODHOST --prefix=$PREFIX
           make -j$(nproc)
           sudo make install
-          ls -la ${PODLIBS}/opus/lib/pkgconfig/
           
-      - name: Clone vosk
-        run: |
+          # Download and setup vosk
+          cd $WORKSPACE
           mkdir -p libs/vosk
           cd libs/vosk
           wget -q https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
           unzip -o vosk-win64-0.3.45.zip
           mv vosk-win64-0.3.45 vosk
           
-      - name: Create MinGW import library from vosk DLL
-        run: |
-          cd libs/vosk/vosk
+          # Create MinGW import library
+          cd vosk
           gendef libvosk.dll
           x86_64-w64-mingw32-dlltool -d libvosk.def -l libvosk.a -D libvosk.dll
           
-      - name: Patch vosk module
+          echo "=== Build libraries done ==="
+          ls -la $PREFIX/lib/
+          ls -la vosk/
+          
+      - name: Setup Go modules and build
         run: |
-          cd chipper
+          set -e
+          export WORKSPACE=$GITHUB_WORKSPACE
+          export PREFIX=$WORKSPACE/local
+          
+          cd $WORKSPACE/chipper
+          
+          # Download Go modules
           go mod download
+          
+          # Copy vosk header
           GOMODCACHE=$(go env GOMODCACHE)
-          sudo cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
+          sudo cp $WORKSPACE/libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
           
-      - name: Build chipper
-        env:
-          GOOS: windows
-          GOARCH: amd64
-          GO_TAGS: nolibopusfile
-          CGO_ENABLED: 1
-          CC: x86_64-w64-mingw32-gcc
-          CGO_LDFLAGS: "-L${GITHUB_WORKSPACE}/libs/opus/lib -L${GITHUB_WORKSPACE}/libs/ogg/lib -L${GITHUB_WORKSPACE}/libs/vosk/vosk"
-          CGO_CFLAGS: "-I${GITHUB_WORKSPACE}/libs/opus/include -I${GITHUB_WORKSPACE}/libs/ogg/include -I${GITHUB_WORKSPACE}/libs/vosk/vosk"
-          PKG_CONFIG_PATH: "${GITHUB_WORKSPACE}/libs/opus/lib/pkgconfig:${GITHUB_WORKSPACE}/libs/ogg/lib/pkgconfig"
-        run: |
-          cd chipper
+          # Build chipper with all env vars
+          export GOOS=windows
+          export GOARCH=amd64
+          export GO_TAGS=nolibopusfile
+          export CGO_ENABLED=1
+          export CC=x86_64-w64-mingw32-gcc
+          export CGO_LDFLAGS="-L$PREFIX/lib -L$WORKSPACE/libs/vosk/vosk"
+          export CGO_CFLAGS="-I$PREFIX/include -I$WORKSPACE/libs/vosk/vosk"
+          export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+          
+          # Compile resources
           x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
-          go build -tags ${GO_TAGS} -ldflags "-H=windowsgui" -o windows/chipper.exe ./cmd/windows
-          go build -tags ${GO_TAGS} -ldflags "-H=windowsgui" -o windows/uninstall.exe ./cmd/wire-pod-installer/uninstall/main.go
           
-      - name: Create distribution package
+          # Build chipper
+          go build -tags $GO_TAGS -ldflags "-H=windowsgui" -o windows/chipper.exe ./cmd/windows
+          
+          # Build uninstaller
+          go build -tags $GO_TAGS -ldflags "-H=windowsgui" -o windows/uninstall.exe ./cmd/wire-pod-installer/uninstall/main.go
+          
+          echo "=== Build done ==="
+          ls -la windows/*.exe
+          
+      - name: Package distribution
         run: |
-          cd chipper
+          set -e
+          export WORKSPACE=$GITHUB_WORKSPACE
+          export PREFIX=$WORKSPACE/local
+          
+          cd $WORKSPACE/chipper
           mkdir -p tmp/wire-pod/chipper
+          
+          # Copy all files
           cp -r intent-data tmp/wire-pod/chipper/
           cp weather-map.json tmp/wire-pod/chipper/
           cp -r webroot tmp/wire-pod/chipper/
@@ -101,9 +127,11 @@ jobs:
           cp -r icons tmp/wire-pod/chipper/
           cp windows/uninstall.exe tmp/wire-pod/
           cp windows/chipper.exe tmp/wire-pod/chipper/
-          cp ../libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
-          cp ../libs/opus/lib/*.dll tmp/wire-pod/chipper/ 2>/dev/null || echo "No opus dll"
-          cp ../libs/ogg/lib/*.dll tmp/wire-pod/chipper/ 2>/dev/null || echo "No ogg dll"
+          cp $WORKSPACE/libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
+          cp $PREFIX/bin/*.dll tmp/wire-pod/chipper/ 2>/dev/null || true
+          
+          echo "=== Package created ==="
+          ls -la tmp/wire-pod/chipper/
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
