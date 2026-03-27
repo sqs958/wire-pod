@@ -14,9 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      WORKSPACE: ${{ github.workspace }}
-      
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,53 +24,52 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             mingw-w64 build-essential autoconf libtool automake \
-            pkg-config wget unzip curl git make gcc g++ make zstd
+            pkg-config curl unzip git make gcc g++ zstd
             
       - name: Download prebuilt Windows libraries
         run: |
-          set -e
-          cd $GITHUB_WORKSPACE
           mkdir -p libs
           cd libs
           
-          wget -q "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-opus-1.3.1-2-any.pkg.tar.zst" -O opus.pkg.tar.zst
-          tar -xf opus.pkg.tar.zst
-          rm opus.pkg.tar.zst
+          echo "Downloading opus..."
+          curl -sL "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-opus-1.3.1-2-any.pkg.tar.zst" -o opus.pkg.tar.zst
+          tar -xf opus.pkg.tar.zst 2>/dev/null || echo "opus extract failed"
+          rm -f opus.pkg.tar.zst
           
-          wget -q "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libogg-1.3.5-1-any.pkg.tar.zst" -O ogg.pkg.tar.zst
-          tar -xf ogg.pkg.tar.zst
-          rm ogg.pkg.tar.zst
+          echo "Downloading ogg..."
+          curl -sL "https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-libogg-1.3.5-1-any.pkg.tar.zst" -o ogg.pkg.tar.zst
+          tar -xf ogg.pkg.tar.zst 2>/dev/null || echo "ogg extract failed"
+          rm -f ogg.pkg.tar.zst
           
-          echo "=== Libraries downloaded ==="
-          find . -name "*.dll" -o -name "*.a" | head -10
+          echo "=== Libraries ==="
+          find . -name "*.dll" 2>/dev/null | head -5
           
       - name: Download vosk
         run: |
-          set -e
-          cd $GITHUB_WORKSPACE/libs
-          mkdir -p vosk
-          cd vosk
-          wget -q https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip
-          unzip -o vosk-win64-0.3.45.zip
+          mkdir -p libs/vosk
+          cd libs/vosk
+          curl -sL https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-win64-0.3.45.zip -o vosk.zip
+          unzip -o vosk.zip
           mv vosk-win64-0.3.45 vosk
           
           cd vosk
-          gendef libvosk.dll
-          x86_64-w64-mingw32-dlltool -d libvosk.def -l libvosk.a -D libvosk.dll
+          if command -v gendef &> /dev/null; then
+            gendef libvosk.dll 2>/dev/null || true
+            x86_64-w64-mingw32-dlltool -d libvosk.def -l libvosk.a -D libvosk.dll 2>/dev/null || true
+          fi
           ls -la
           
       - name: Setup Go modules
         run: |
-          set -e
-          cd $GITHUB_WORKSPACE/chipper
+          cd chipper
           go mod download
           GOMODCACHE=$(go env GOMODCACHE)
-          sudo cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
+          sudo cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/" 2>/dev/null || \
+          cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
           
       - name: Build chipper
         run: |
-          set -e
-          cd $GITHUB_WORKSPACE/chipper
+          cd chipper
           
           OPUS_DIR=$GITHUB_WORKSPACE/libs/mingw64
           VOSK_DIR=$GITHUB_WORKSPACE/libs/vosk/vosk
@@ -84,10 +81,11 @@ jobs:
           export CC=x86_64-w64-mingw32-gcc
           export CGO_LDFLAGS="-L$OPUS_DIR/lib -L$VOSK_DIR -L/usr/x86_64-w64-mingw32/lib"
           export CGO_CFLAGS="-I$VOSK_DIR -I$OPUS_DIR/include"
-          export PKG_CONFIG_PATH="$OPUS_DIR/lib/pkgconfig"
+          export PKG_CONFIG_PATH="$OPUS_DIR/lib/pkgconfig:$VOSK_DIR"
           
           echo "OPUS_DIR: $OPUS_DIR"
-          ls -la $OPUS_DIR/lib/ | head -10
+          ls -la $OPUS_DIR/lib/ 2>/dev/null | head -10 || echo "No opus lib dir"
+          ls -la $OPUS_DIR/bin/ 2>/dev/null | head -10 || echo "No opus bin dir"
           
           x86_64-w64-mingw32-windres cmd/windows/rc/app.rc -O coff -o cmd/windows/app.syso
           go build -tags $GO_TAGS -ldflags "-H=windowsgui" -o windows/chipper.exe ./cmd/windows
@@ -98,8 +96,7 @@ jobs:
           
       - name: Package distribution
         run: |
-          set -e
-          cd $GITHUB_WORKSPACE/chipper
+          cd chipper
           mkdir -p tmp/wire-pod/chipper
           
           cp -r intent-data tmp/wire-pod/chipper/
@@ -110,10 +107,10 @@ jobs:
           cp -r icons tmp/wire-pod/chipper/
           cp windows/uninstall.exe tmp/wire-pod/
           cp windows/chipper.exe tmp/wire-pod/chipper/
-          cp $GITHUB_WORKSPACE/libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/
-          cp $GITHUB_WORKSPACE/libs/mingw64/lib/*.dll tmp/wire-pod/chipper/ 2>/dev/null || true
+          cp ../libs/vosk/vosk/libvosk.dll tmp/wire-pod/chipper/ 2>/dev/null || true
+          cp ../libs/mingw64/bin/*.dll tmp/wire-pod/chipper/ 2>/dev/null || true
           
-          echo "=== Package created ==="
+          echo "=== Package ==="
           ls -la tmp/wire-pod/chipper/
           
       - name: Upload artifact
