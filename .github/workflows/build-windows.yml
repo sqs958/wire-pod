@@ -22,7 +22,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 build-essential autoconf unzip zip curl git pkg-config libopus-dev libogg-dev binutils-mingw-w64-x86-64
+          sudo apt-get install -y mingw-w64 build-essential autoconf unzip zip curl git pkg-config
+          sudo apt-get install -y mingw-w64-i686-dev mingw-w64-x86-64-dev
           
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -41,8 +42,7 @@ jobs:
         run: |
           sudo apt-get install -y mingw-w64-tools
           cd libs/vosk/vosk
-          gendef libvosk.dll 2>/dev/null || echo "gendef not available"
-          cat libvosk.def | head -20
+          gendef libvosk.dll
           x86_64-w64-mingw32-dlltool -d libvosk.def -l libvosk.a -D libvosk.dll
           ls -la libvosk.a
           
@@ -60,7 +60,7 @@ jobs:
           GO_TAGS: nolibopusfile
           CGO_ENABLED: 1
           CC: x86_64-w64-mingw32-gcc
-          CGO_LDFLAGS: "-L${GITHUB_WORKSPACE}/libs/vosk/vosk"
+          CGO_LDFLAGS: "-L${GITHUB_WORKSPACE}/libs/vosk/vosk -L/usr/x86_64-w64-mingw32/lib"
           CGO_CFLAGS: "-I${GITHUB_WORKSPACE}/libs/vosk/vosk"
         run: |
           cd chipper
