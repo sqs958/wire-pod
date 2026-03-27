@@ -42,7 +42,7 @@ jobs:
           cd chipper
           go mod download
           GOMODCACHE=$(go env GOMODCACHE)
-          cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
+          sudo cp ../libs/vosk/vosk/vosk_api.h "$GOMODCACHE/github.com/alphacep/vosk-api/go@v0.3.45/"
           
       - name: Build chipper
         env:
